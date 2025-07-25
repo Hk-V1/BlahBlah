@@ -2,13 +2,13 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
 import Head from 'next/head';
 
-const API_BASE = 'https://blahblah-zl3k.onrender.com';
-console.log('API_BASE:', API_BASE); 
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'https://your-render-app.onrender.com';
 
 export default function Home() {
   const [isLogin, setIsLogin] = useState(true);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const router = useRouter();
@@ -28,6 +28,18 @@ export default function Home() {
 
     if (!username.trim() || !password.trim()) {
       setError('Please fill in all fields');
+      setLoading(false);
+      return;
+    }
+
+    if (!isLogin && password !== confirmPassword) {
+      setError('Passwords do not match');
+      setLoading(false);
+      return;
+    }
+
+    if (!isLogin && password.length < 4) {
+      setError('Password must be at least 4 characters long');
       setLoading(false);
       return;
     }
@@ -119,6 +131,19 @@ export default function Home() {
               />
             </div>
 
+            {!isLogin && (
+              <div className="form-group">
+                <input
+                  type="password"
+                  placeholder="Confirm Password"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  required
+                  minLength={4}
+                />
+              </div>
+            )}
+
             <button type="submit" disabled={loading} className="submit-btn">
               {loading ? 'Please wait...' : isLogin ? 'Login' : 'Register'}
             </button>
@@ -135,6 +160,7 @@ export default function Home() {
                   setError('');
                   setUsername('');
                   setPassword('');
+                  setConfirmPassword('');
                 }}
               >
                 {isLogin ? 'Register here' : 'Login here'}
