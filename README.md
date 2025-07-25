@@ -79,25 +79,3 @@ This will start the Next.js development server on `http://localhost:3000`.
 - Backend can be deployed to [Render](https://render.com/) or [Railway](https://railway.app/)  
 
 Make sure to update API and WebSocket URLs accordingly in both frontend and backend files.
-
-## Environment Variables
-
-You can define the following variables in your `.env` files (or directly in code):
-
-### Frontend (`chat-frontend`)
-
-```
-NEXT_PUBLIC_API_URL=[https://blah-blah-omega.vercel.app/]
-```
-
-### Backend (`chat-backend`)
-
-If using database or authentication tokens, declare those as needed.
-
-## License
-
-This project is open source and available under the MIT License.
-
-## Credits
-
-Developed as a simple real-time messaging app using modern full-stack technologies.
