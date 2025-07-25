@@ -3,7 +3,7 @@ import { useRouter } from 'next/router';
 import Head from 'next/head';
 import io from 'socket.io-client';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'https://your-render-app.onrender.com';
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'https://blahblah-zl3k.onrender.com';
 
 export default function Chat() {
   const [socket, setSocket] = useState(null);
