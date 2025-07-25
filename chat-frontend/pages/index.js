@@ -9,25 +9,26 @@ export default function AuthPage() {
   const router = useRouter();
 
   const handleSubmit = async (e) => {
-    e.preventDefault();
-    const endpoint = isLogin ? '/login' : '/register';
+  e.preventDefault();
+  const endpoint = isLogin ? '/login' : '/register';
 
-    try {
-      const res = await axios.post(`https://chat-backend-xyz.onrender.com${endpoint}`, {
-        username,
-        password,
-      });
+  try {
+    const res = await axios.post(`https://chat-backend-xyz.onrender.com${endpoint}`, {
+      username,
+      password,
+    });
 
-      if (res.data.success) {
-        localStorage.setItem('user', JSON.stringify(res.data.user));
-        router.push('/chat');
-      } else {
-        alert(res.data.message);
-      }
-    } catch (err) {
-      alert('Server error');
+    if (res.data.success) {
+      localStorage.setItem('user', JSON.stringify(res.data.user));
+      router.push('/chat');
+    } else {
+      alert(res.data.message);
     }
-  };
+  } catch (err) {
+    alert('Server error');
+  }
+};
+
 
   return (
     <div style={{ padding: 40 }}>
