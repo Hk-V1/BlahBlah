@@ -17,11 +17,25 @@ export default function Chat() {
   const [connected, setConnected] = useState(false);
   const [unreadMessages, setUnreadMessages] = useState({});
   const [sidebarOpen, setSidebarOpen] = useState(true); // New state for sidebar toggle
+  const [notificationPermission, setNotificationPermission] = useState('default');
+  const [showUserOptions, setShowUserOptions] = useState(null);
+  const [uploadingFile, setUploadingFile] = useState(false);
   const messagesEndRef = useRef(null);
   const typingTimeoutRef = useRef(null);
+  const fileInputRef = useRef(null);
   const router = useRouter();
 
   useEffect(() => {
+    // Request notification permission
+    const requestNotificationPermission = async () => {
+      if ('Notification' in window) {
+        const permission = await Notification.requestPermission();
+        setNotificationPermission(permission);
+      }
+    };
+
+    requestNotificationPermission();
+
     const token = localStorage.getItem('token');
     const userData = localStorage.getItem('user');
 
@@ -125,13 +139,46 @@ export default function Chat() {
           ...prev,
           [otherUserId]: (prev[otherUserId] || 0) + 1
         }));
+
+        // Show browser notification for incoming messages
+        if (message.senderId !== parsedUser.id) {
+          showNotification(message.senderUsername, message.type === 'file' ? '📎 Sent a file' : message.text);
+        }
       }
     });
 
     // Handle message notifications
     newSocket.on('messageNotification', ({ from, fromId, message, timestamp }) => {
-      // You could show browser notifications here
+      // Show browser notification
+      showNotification(from, message);
       console.log(`New message from ${from}: ${message}`);
+    });
+
+    // Handle file upload completion
+    newSocket.on('fileUploaded', ({ messageId, fileUrl, fileName, fileSize }) => {
+      console.log('File uploaded successfully:', { messageId, fileUrl, fileName, fileSize });
+    });
+
+    // Handle chat deletion
+    newSocket.on('chatDeleted', ({ otherUserId }) => {
+      setConversations(prev => ({
+        ...prev,
+        [otherUserId]: []
+      }));
+    });
+
+    // Handle user removal
+    newSocket.on('userRemoved', ({ removedUserId }) => {
+      setUsers(prevUsers => prevUsers.filter(user => user.id !== removedUserId));
+      if (selectedUser && selectedUser.id === removedUserId) {
+        setSelectedUser(null);
+      }
+      // Remove conversation
+      setConversations(prev => {
+        const newConversations = { ...prev };
+        delete newConversations[removedUserId];
+        return newConversations;
+      });
     });
 
     // Handle typing indicators
@@ -259,6 +306,188 @@ export default function Chat() {
     setSidebarOpen(!sidebarOpen);
   };
 
+  const showNotification = (title, body) => {
+    // Only show notifications if permission is granted and the page is not focused
+    if (notificationPermission === 'granted' && document.hidden) {
+      try {
+        const notification = new Notification(`💬 ${title}`, {
+          body: body,
+          icon: '/favicon.ico', // You can customize this icon
+          badge: '/favicon.ico',
+          tag: 'blahblah-message', // This prevents multiple notifications from stacking
+          requireInteraction: false,
+          silent: false
+        });
+
+        // Auto-close notification after 5 seconds
+        setTimeout(() => {
+          notification.close();
+        }, 5000);
+
+        // Focus the window when notification is clicked
+        notification.onclick = () => {
+          window.focus();
+          notification.close();
+        };
+      } catch (error) {
+        console.log('Notification error:', error);
+      }
+    }
+  };
+
+  const handleFileUpload = async (file) => {
+    if (!file || !socket || !selectedUser) return;
+
+    const maxSize = 10 * 1024 * 1024; // 10MB limit
+    if (file.size > maxSize) {
+      alert('File size must be less than 10MB');
+      return;
+    }
+
+    setUploadingFile(true);
+
+    try {
+      // Create FormData for file upload
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('recipientId', selectedUser.id);
+
+      // Upload file to server
+      const token = localStorage.getItem('token');
+      const response = await fetch(`${API_BASE}/upload`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        },
+        body: formData
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        
+        // Send file message through socket
+        socket.emit('privateMessage', {
+          recipientId: selectedUser.id,
+          type: 'file',
+          fileUrl: result.fileUrl,
+          fileName: file.name,
+          fileSize: file.size,
+          mimeType: file.type
+        });
+      } else {
+        throw new Error('Upload failed');
+      }
+    } catch (error) {
+      console.error('File upload error:', error);
+      alert('Failed to upload file. Please try again.');
+    } finally {
+      setUploadingFile(false);
+    }
+  };
+
+  const triggerFileUpload = () => {
+    fileInputRef.current?.click();
+  };
+
+  const deleteChat = async () => {
+    if (!selectedUser || !socket) return;
+    
+    if (confirm(`Are you sure you want to delete all messages with ${selectedUser.username}?`)) {
+      socket.emit('deleteChat', { otherUserId: selectedUser.id });
+      
+      // Clear local conversation
+      setConversations(prev => ({
+        ...prev,
+        [selectedUser.id]: []
+      }));
+    }
+  };
+
+  const removeUser = async () => {
+    if (!selectedUser || !socket) return;
+    
+    if (confirm(`Are you sure you want to remove ${selectedUser.username} from your contacts? This will delete all messages and you won't be able to chat with them.`)) {
+      socket.emit('removeUser', { userId: selectedUser.id });
+      
+      // Remove from local state
+      setUsers(prevUsers => prevUsers.filter(user => user.id !== selectedUser.id));
+      setSelectedUser(null);
+      
+      // Remove conversation
+      setConversations(prev => {
+        const newConversations = { ...prev };
+        delete newConversations[selectedUser.id];
+        return newConversations;
+      });
+    }
+  };
+
+  const downloadFile = async (fileUrl, fileName) => {
+    try {
+      const response = await fetch(fileUrl);
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (error) {
+      console.error('Download error:', error);
+    }
+  };
+
+  const formatFileSize = (bytes) => {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+  };
+
+  const renderMessage = (msg) => {
+    if (msg.type === 'file') {
+      const isImage = msg.mimeType?.startsWith('image/');
+      
+      return (
+        <div className="file-message">
+          {isImage ? (
+            <div className="image-message">
+              <img 
+                src={msg.fileUrl} 
+                alt={msg.fileName}
+                className="message-image"
+                onClick={() => window.open(msg.fileUrl, '_blank')}
+              />
+              <div className="file-info">
+                <span className="file-name">{msg.fileName}</span>
+                <span className="file-size">{formatFileSize(msg.fileSize)}</span>
+              </div>
+            </div>
+          ) : (
+            <div className="file-attachment">
+              <div className="file-icon">📎</div>
+              <div className="file-details">
+                <span className="file-name">{msg.fileName}</span>
+                <span className="file-size">{formatFileSize(msg.fileSize)}</span>
+              </div>
+              <button 
+                className="download-btn"
+                onClick={() => downloadFile(msg.fileUrl, msg.fileName)}
+              >
+                ⬇️
+              </button>
+            </div>
+          )}
+        </div>
+      );
+    }
+    
+    return <div className="message-text">{msg.text}</div>;
+  };
+
   if (!user) {
     return <div className="loading">Loading...</div>;
   }
@@ -286,6 +515,23 @@ export default function Chat() {
             </div>
           </div>
           <div className="header-right">
+            <div className="notification-status">
+              {notificationPermission === 'granted' ? (
+                <span className="notification-enabled">🔔 Notifications On</span>
+              ) : notificationPermission === 'denied' ? (
+                <span className="notification-disabled">🔕 Notifications Off</span>
+              ) : (
+                <button 
+                  onClick={async () => {
+                    const permission = await Notification.requestPermission();
+                    setNotificationPermission(permission);
+                  }}
+                  className="enable-notifications-btn"
+                >
+                  🔔 Enable Notifications
+                </button>
+              )}
+            </div>
             <span className="username">Hello, {user.username}!</span>
             <button onClick={logout} className="logout-btn">Logout</button>
           </div>
@@ -324,6 +570,38 @@ export default function Chat() {
                       {unreadMessages[contact.id]}
                     </div>
                   )}
+                  <div className="contact-options">
+                    <button 
+                      className="options-btn"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setShowUserOptions(showUserOptions === contact.id ? null : contact.id);
+                      }}
+                    >
+                      ⋮
+                    </button>
+                    {showUserOptions === contact.id && (
+                      <div className="options-menu">
+                        <button onClick={(e) => {
+                          e.stopPropagation();
+                          selectUser(contact);
+                          deleteChat();
+                          setShowUserOptions(null);
+                        }}>
+                          🗑️ Delete Chat
+                        </button>
+                        <button onClick={(e) => {
+                          e.stopPropagation();
+                          if (confirm(`Remove ${contact.username} from contacts?`)) {
+                            removeUser();
+                          }
+                          setShowUserOptions(null);
+                        }}>
+                          ❌ Remove User
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 </div>
               ))}
               {users.length === 0 && (
@@ -349,6 +627,22 @@ export default function Chat() {
                         {selectedUser.isOnline ? 'Online' : 'Offline'}
                       </span>
                     </div>
+                  </div>
+                  <div className="chat-actions">
+                    <button 
+                      className="action-btn"
+                      onClick={deleteChat}
+                      title="Delete Chat"
+                    >
+                      🗑️
+                    </button>
+                    <button 
+                      className="action-btn"
+                      onClick={removeUser}
+                      title="Remove User"
+                    >
+                      ❌
+                    </button>
                   </div>
                 </div>
 
@@ -397,18 +691,40 @@ export default function Chat() {
                 {/* Message Input */}
                 <form onSubmit={sendMessage} className="message-input-form">
                   <div className="input-container">
+                    <button 
+                      type="button"
+                      className="file-upload-btn"
+                      onClick={triggerFileUpload}
+                      disabled={!connected || uploadingFile}
+                      title="Upload File"
+                    >
+                      {uploadingFile ? '⏳' : '📎'}
+                    </button>
                     <input
                       type="text"
                       value={message}
                       onChange={handleInputChange}
                       placeholder={`Message ${selectedUser.username}...`}
-                      disabled={!connected}
+                      disabled={!connected || uploadingFile}
                       maxLength={500}
                     />
-                    <button type="submit" disabled={!message.trim() || !connected}>
+                    <button type="submit" disabled={!message.trim() || !connected || uploadingFile}>
                       Send
                     </button>
                   </div>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    style={{ display: 'none' }}
+                    onChange={(e) => {
+                      const file = e.target.files[0];
+                      if (file) {
+                        handleFileUpload(file);
+                      }
+                      e.target.value = '';
+                    }}
+                    accept="*/*"
+                  />
                 </form>
               </>
             ) : (
@@ -477,6 +793,37 @@ export default function Chat() {
             display: flex;
             align-items: center;
             gap: 15px;
+          }
+
+          .notification-status {
+            font-size: 0.8rem;
+            display: flex;
+            align-items: center;
+          }
+
+          .notification-enabled {
+            color: #4caf50;
+            font-weight: 500;
+          }
+
+          .notification-disabled {
+            color: #ff9800;
+            font-weight: 500;
+          }
+
+          .enable-notifications-btn {
+            background: rgba(255, 255, 255, 0.2);
+            color: white;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            padding: 6px 12px;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            cursor: pointer;
+            transition: background 0.3s ease;
+          }
+
+          .enable-notifications-btn:hover {
+            background: rgba(255, 255, 255, 0.3);
           }
 
           .username {
@@ -555,6 +902,67 @@ export default function Chat() {
             cursor: pointer;
             transition: background 0.2s ease;
             position: relative;
+          }
+
+          .contact-options {
+            position: relative;
+          }
+
+          .options-btn {
+            background: none;
+            border: none;
+            color: #666;
+            cursor: pointer;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 1.2rem;
+            opacity: 0;
+            transition: all 0.2s ease;
+          }
+
+          .contact-item:hover .options-btn {
+            opacity: 1;
+          }
+
+          .options-btn:hover {
+            background: #f0f0f0;
+            color: #333;
+          }
+
+          .options-menu {
+            position: absolute;
+            top: 100%;
+            right: 0;
+            background: white;
+            border: 1px solid #e0e0e0;
+            border-radius: 6px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            z-index: 1000;
+            min-width: 140px;
+          }
+
+          .options-menu button {
+            display: block;
+            width: 100%;
+            padding: 8px 12px;
+            text-align: left;
+            border: none;
+            background: none;
+            cursor: pointer;
+            font-size: 0.85rem;
+            transition: background 0.2s ease;
+          }
+
+          .options-menu button:hover {
+            background: #f8f9fa;
+          }
+
+          .options-menu button:first-child {
+            border-radius: 6px 6px 0 0;
+          }
+
+          .options-menu button:last-child {
+            border-radius: 0 0 6px 6px;
           }
 
           .contact-item:hover {
@@ -644,6 +1052,30 @@ export default function Chat() {
             padding: 15px 20px;
             background: white;
             border-bottom: 1px solid #e0e0e0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+          }
+
+          .chat-actions {
+            display: flex;
+            gap: 8px;
+          }
+
+          .action-btn {
+            background: none;
+            border: 1px solid #e0e0e0;
+            color: #666;
+            border-radius: 6px;
+            padding: 6px 10px;
+            cursor: pointer;
+            font-size: 1rem;
+            transition: all 0.2s ease;
+          }
+
+          .action-btn:hover {
+            background: #f8f9fa;
+            border-color: #ccc;
           }
 
           .selected-user-info {
@@ -847,6 +1279,120 @@ export default function Chat() {
             align-items: center;
           }
 
+          .file-upload-btn {
+            background: #f1f3f4;
+            border: 2px solid #e0e0e0;
+            color: #666;
+            border-radius: 50%;
+            width: 45px;
+            height: 45px;
+            cursor: pointer;
+            font-size: 1.1rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.3s ease;
+          }
+
+          .file-upload-btn:hover:not(:disabled) {
+            background: #e8eaed;
+            border-color: #667eea;
+            color: #667eea;
+          }
+
+          .file-upload-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+          }
+
+          .file-message {
+            margin-top: 6px;
+          }
+
+          .image-message {
+            max-width: 300px;
+          }
+
+          .message-image {
+            max-width: 100%;
+            max-height: 200px;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: transform 0.2s ease;
+          }
+
+          .message-image:hover {
+            transform: scale(1.02);
+          }
+
+          .file-info {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            margin-top: 6px;
+            font-size: 0.8rem;
+            opacity: 0.8;
+          }
+
+          .file-attachment {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            margin-top: 6px;
+          }
+
+          .other-message .file-attachment {
+            background: rgba(0, 0, 0, 0.05);
+          }
+
+          .file-icon {
+            font-size: 1.5rem;
+          }
+
+          .file-details {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+          }
+
+          .file-name {
+            font-weight: 500;
+            font-size: 0.9rem;
+          }
+
+          .file-size {
+            font-size: 0.75rem;
+            opacity: 0.7;
+          }
+
+          .download-btn {
+            background: rgba(255, 255, 255, 0.2);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            color: inherit;
+            border-radius: 4px;
+            padding: 4px 8px;
+            cursor: pointer;
+            font-size: 1rem;
+            transition: background 0.2s ease;
+          }
+
+          .download-btn:hover {
+            background: rgba(255, 255, 255, 0.3);
+          }
+
+          .other-message .download-btn {
+            background: rgba(0, 0, 0, 0.1);
+            border-color: rgba(0, 0, 0, 0.2);
+          }
+
+          .other-message .download-btn:hover {
+            background: rgba(0, 0, 0, 0.15);
+          }
+
           .input-container input {
             flex: 1;
             padding: 12px 16px;
@@ -932,6 +1478,10 @@ export default function Chat() {
             }
 
             .username {
+              display: none;
+            }
+
+            .notification-status {
               display: none;
             }
           }
