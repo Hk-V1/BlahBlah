@@ -4,16 +4,18 @@ import Head from 'next/head';
 import io from 'socket.io-client';
 
 const API_BASE = 'https://blahblah-zl3k.onrender.com';
-console.log('API_BASE:', API_BASE);
 
 export default function Chat() {
   const [socket, setSocket] = useState(null);
-  const [messages, setMessages] = useState([]);
-  const [message, setMessage] = useState('');
   const [user, setUser] = useState(null);
+  const [users, setUsers] = useState([]);
   const [activeUsers, setActiveUsers] = useState([]);
+  const [selectedUser, setSelectedUser] = useState(null);
+  const [conversations, setConversations] = useState({});
+  const [message, setMessage] = useState('');
   const [typingUsers, setTypingUsers] = useState(new Set());
   const [connected, setConnected] = useState(false);
+  const [unreadMessages, setUnreadMessages] = useState({});
   const messagesEndRef = useRef(null);
   const typingTimeoutRef = useRef(null);
   const router = useRouter();
@@ -64,27 +66,75 @@ export default function Chat() {
       setConnected(false);
     });
 
-    newSocket.on('messages', (msgs) => {
-      setMessages(msgs);
+    // Get list of all users
+    newSocket.on('usersList', (usersList) => {
+      setUsers(usersList);
     });
 
-    newSocket.on('message', (msg) => {
-      setMessages(prev => [...prev, msg]);
+    // Handle active users updates
+    newSocket.on('activeUsers', (activeUsersList) => {
+      setActiveUsers(activeUsersList);
+      // Update online status in users list
+      setUsers(prevUsers => 
+        prevUsers.map(user => ({
+          ...user,
+          isOnline: activeUsersList.some(activeUser => activeUser.id === user.id)
+        }))
+      );
     });
 
-    newSocket.on('activeUsers', (users) => {
-      setActiveUsers(users);
+    // Handle user coming online
+    newSocket.on('userOnline', (userInfo) => {
+      setUsers(prevUsers => 
+        prevUsers.map(user => 
+          user.id === userInfo.id ? { ...user, isOnline: true } : user
+        )
+      );
     });
 
-    newSocket.on('userJoined', (user) => {
-      // Optional: show notification that user joined
+    // Handle user going offline
+    newSocket.on('userOffline', (userInfo) => {
+      setUsers(prevUsers => 
+        prevUsers.map(user => 
+          user.id === userInfo.id ? { ...user, isOnline: false } : user
+        )
+      );
     });
 
-    newSocket.on('userLeft', (user) => {
-      // Optional: show notification that user left
+    // Handle conversation messages
+    newSocket.on('conversationMessages', ({ otherUserId, messages }) => {
+      setConversations(prev => ({
+        ...prev,
+        [otherUserId]: messages
+      }));
     });
 
-    newSocket.on('userTyping', ({ username, isTyping }) => {
+    // Handle new private message
+    newSocket.on('newMessage', (message) => {
+      const otherUserId = message.senderId === parsedUser.id ? message.recipientId : message.senderId;
+      
+      setConversations(prev => ({
+        ...prev,
+        [otherUserId]: [...(prev[otherUserId] || []), message]
+      }));
+
+      // Add unread notification if not currently viewing this conversation
+      if (!selectedUser || selectedUser.id !== otherUserId) {
+        setUnreadMessages(prev => ({
+          ...prev,
+          [otherUserId]: (prev[otherUserId] || 0) + 1
+        }));
+      }
+    });
+
+    // Handle message notifications
+    newSocket.on('messageNotification', ({ from, fromId, message, timestamp }) => {
+      // You could show browser notifications here
+      console.log(`New message from ${from}: ${message}`);
+    });
+
+    // Handle typing indicators
+    newSocket.on('userTyping', ({ userId, username, isTyping }) => {
       setTypingUsers(prev => {
         const newSet = new Set(prev);
         if (isTyping) {
@@ -114,21 +164,46 @@ export default function Chat() {
 
   useEffect(() => {
     scrollToBottom();
-  }, [messages]);
+  }, [conversations, selectedUser]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
+  const selectUser = (selectedUserInfo) => {
+    if (selectedUser?.id === selectedUserInfo.id) return;
+
+    // Leave previous conversation
+    if (selectedUser && socket) {
+      socket.emit('leaveConversation', { otherUserId: selectedUser.id });
+    }
+
+    setSelectedUser(selectedUserInfo);
+    
+    // Clear unread messages for this user
+    setUnreadMessages(prev => ({
+      ...prev,
+      [selectedUserInfo.id]: 0
+    }));
+
+    // Join new conversation
+    if (socket) {
+      socket.emit('joinConversation', { otherUserId: selectedUserInfo.id });
+    }
+  };
+
   const sendMessage = (e) => {
     e.preventDefault();
-    if (!message.trim() || !socket) return;
+    if (!message.trim() || !socket || !selectedUser) return;
 
-    socket.emit('message', { text: message.trim() });
+    socket.emit('privateMessage', { 
+      recipientId: selectedUser.id, 
+      text: message.trim() 
+    });
     setMessage('');
     
     // Stop typing indicator
-    socket.emit('typing', false);
+    socket.emit('typing', { recipientId: selectedUser.id, isTyping: false });
     if (typingTimeoutRef.current) {
       clearTimeout(typingTimeoutRef.current);
     }
@@ -137,10 +212,10 @@ export default function Chat() {
   const handleInputChange = (e) => {
     setMessage(e.target.value);
     
-    if (!socket) return;
+    if (!socket || !selectedUser) return;
 
     // Send typing indicator
-    socket.emit('typing', true);
+    socket.emit('typing', { recipientId: selectedUser.id, isTyping: true });
     
     // Clear existing timeout
     if (typingTimeoutRef.current) {
@@ -149,7 +224,7 @@ export default function Chat() {
     
     // Set timeout to stop typing indicator
     typingTimeoutRef.current = setTimeout(() => {
-      socket.emit('typing', false);
+      socket.emit('typing', { recipientId: selectedUser.id, isTyping: false });
     }, 1000);
   };
 
@@ -167,6 +242,11 @@ export default function Chat() {
       hour: '2-digit', 
       minute: '2-digit' 
     });
+  };
+
+  const getCurrentMessages = () => {
+    if (!selectedUser) return [];
+    return conversations[selectedUser.id] || [];
   };
 
   if (!user) {
@@ -195,88 +275,128 @@ export default function Chat() {
         </header>
 
         <div className="chat-body">
-          {/* Active Users Sidebar */}
-          <aside className="users-sidebar">
-            <h3>Active Users ({activeUsers.length})</h3>
-            <div className="users-list">
-              {activeUsers.map((activeUser) => (
+          {/* Contacts Sidebar */}
+          <aside className="contacts-sidebar">
+            <h3>Contacts ({users.length})</h3>
+            <div className="contacts-list">
+              {users.map((contact) => (
                 <div 
-                  key={activeUser.id} 
-                  className={`user-item ${activeUser.id === user.id ? 'current-user' : ''}`}
+                  key={contact.id} 
+                  className={`contact-item ${selectedUser?.id === contact.id ? 'selected' : ''}`}
+                  onClick={() => selectUser(contact)}
                 >
-                  <div className="user-avatar">
-                    {activeUser.username.charAt(0).toUpperCase()}
+                  <div className="contact-avatar">
+                    {contact.username.charAt(0).toUpperCase()}
                   </div>
-                  <span className="user-name">
-                    {activeUser.username}
-                    {activeUser.id === user.id && ' (You)'}
-                  </span>
-                  <div className="user-status"></div>
+                  <div className="contact-info">
+                    <span className="contact-name">
+                      {contact.username}
+                    </span>
+                    <div className="contact-status">
+                      <span className={`status-indicator ${contact.isOnline ? 'online' : 'offline'}`}></span>
+                      {contact.isOnline ? 'Online' : 'Offline'}
+                    </div>
+                  </div>
+                  {unreadMessages[contact.id] > 0 && (
+                    <div className="unread-badge">
+                      {unreadMessages[contact.id]}
+                    </div>
+                  )}
                 </div>
               ))}
+              {users.length === 0 && (
+                <div className="no-contacts">
+                  <p>No other users registered yet.</p>
+                </div>
+              )}
             </div>
           </aside>
 
           {/* Chat Messages */}
           <main className="chat-main">
-            <div className="messages-container">
-              {messages.length === 0 ? (
-                <div className="empty-state">
-                  <h3>Welcome to BlahBlah! 👋</h3>
-                  <p>Start chatting with people around the world!</p>
-                </div>
-              ) : (
-                messages.map((msg) => (
-                  <div 
-                    key={msg.id} 
-                    className={`message ${msg.userId === user.id ? 'own-message' : 'other-message'}`}
-                  >
-                    <div className="message-content">
-                      <div className="message-header">
-                        <span className="message-username">{msg.username}</span>
-                        <span className="message-time">{formatTime(msg.timestamp)}</span>
-                      </div>
-                      <div className="message-text">{msg.text}</div>
+            {selectedUser ? (
+              <>
+                <div className="chat-header-selected">
+                  <div className="selected-user-info">
+                    <div className="selected-user-avatar">
+                      {selectedUser.username.charAt(0).toUpperCase()}
+                    </div>
+                    <div>
+                      <h4>{selectedUser.username}</h4>
+                      <span className={`status-text ${selectedUser.isOnline ? 'online' : 'offline'}`}>
+                        {selectedUser.isOnline ? 'Online' : 'Offline'}
+                      </span>
                     </div>
                   </div>
-                ))
-              )}
-              
-              {/* Typing indicators */}
-              {typingUsers.size > 0 && (
-                <div className="typing-indicator">
-                  <div className="typing-content">
-                    <div className="typing-dots">
-                      <span></span>
-                      <span></span>
-                      <span></span>
-                    </div>
-                    <span className="typing-text">
-                      {Array.from(typingUsers).join(', ')} {typingUsers.size === 1 ? 'is' : 'are'} typing...
-                    </span>
-                  </div>
                 </div>
-              )}
-              
-              <div ref={messagesEndRef} />
-            </div>
 
-            {/* Message Input */}
-            <form onSubmit={sendMessage} className="message-input-form">
-              <div className="input-container">
-                <input
-                  type="text"
-                  value={message}
-                  onChange={handleInputChange}
-                  placeholder="Type your message..."
-                  disabled={!connected}
-                  maxLength={500}
-                />
-                <button type="submit" disabled={!message.trim() || !connected}>
-                  Send
-                </button>
+                <div className="messages-container">
+                  {getCurrentMessages().length === 0 ? (
+                    <div className="empty-state">
+                      <h3>Start chatting with {selectedUser.username}! 👋</h3>
+                      <p>Send a message to begin your conversation.</p>
+                    </div>
+                  ) : (
+                    getCurrentMessages().map((msg) => (
+                      <div 
+                        key={msg.id} 
+                        className={`message ${msg.senderId === user.id ? 'own-message' : 'other-message'}`}
+                      >
+                        <div className="message-content">
+                          <div className="message-header">
+                            <span className="message-username">{msg.senderUsername}</span>
+                            <span className="message-time">{formatTime(msg.timestamp)}</span>
+                          </div>
+                          <div className="message-text">{msg.text}</div>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                  
+                  {/* Typing indicators */}
+                  {typingUsers.size > 0 && (
+                    <div className="typing-indicator">
+                      <div className="typing-content">
+                        <div className="typing-dots">
+                          <span></span>
+                          <span></span>
+                          <span></span>
+                        </div>
+                        <span className="typing-text">
+                          {Array.from(typingUsers).join(', ')} {typingUsers.size === 1 ? 'is' : 'are'} typing...
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                  
+                  <div ref={messagesEndRef} />
+                </div>
+
+                {/* Message Input */}
+                <form onSubmit={sendMessage} className="message-input-form">
+                  <div className="input-container">
+                    <input
+                      type="text"
+                      value={message}
+                      onChange={handleInputChange}
+                      placeholder={`Message ${selectedUser.username}...`}
+                      disabled={!connected}
+                      maxLength={500}
+                    />
+                    <button type="submit" disabled={!message.trim() || !connected}>
+                      Send
+                    </button>
+                  </div>
+                </form>
+              </>
+            ) : (
+              <div className="no-chat-selected">
+                <div className="no-chat-content">
+                  <h3>💬 Welcome to BlahBlah!</h3>
+                  <p>Select a contact from the left to start chatting</p>
+                </div>
               </div>
-            </form>
+            )}
           </main>
         </div>
 
@@ -338,46 +458,134 @@ export default function Chat() {
             overflow: hidden;
           }
 
-          .users-sidebar {
-            width: 250px;
+          .contacts-sidebar {
+            width: 300px;
             background: white;
             border-right: 1px solid #e0e0e0;
-            padding: 20px;
-            overflow-y: auto;
-          }
-
-          .users-sidebar h3 {
-            margin-top: 0;
-            color: #333;
-            font-size: 1.1rem;
-            margin-bottom: 20px;
-          }
-
-          .users-list {
             display: flex;
             flex-direction: column;
-            gap: 10px;
           }
 
-          .user-item {
+          .contacts-sidebar h3 {
+            margin: 0;
+            padding: 20px;
+            color: #333;
+            font-size: 1.1rem;
+            border-bottom: 1px solid #e0e0e0;
+          }
+
+          .contacts-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 10px 0;
+          }
+
+          .contact-item {
             display: flex;
             align-items: center;
             gap: 12px;
-            padding: 10px;
-            border-radius: 8px;
+            padding: 12px 20px;
+            cursor: pointer;
             transition: background 0.2s ease;
             position: relative;
           }
 
-          .user-item:hover {
+          .contact-item:hover {
             background: #f8f9fa;
           }
 
-          .user-item.current-user {
+          .contact-item.selected {
             background: #e3f2fd;
+            border-right: 3px solid #667eea;
           }
 
-          .user-avatar {
+          .contact-avatar {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+            font-size: 1rem;
+          }
+
+          .contact-info {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+          }
+
+          .contact-name {
+            font-size: 0.95rem;
+            font-weight: 500;
+            color: #333;
+          }
+
+          .contact-status {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 0.8rem;
+            color: #666;
+          }
+
+          .status-indicator {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+          }
+
+          .status-indicator.online {
+            background: #4caf50;
+          }
+
+          .status-indicator.offline {
+            background: #ccc;
+          }
+
+          .unread-badge {
+            background: #667eea;
+            color: white;
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.7rem;
+            font-weight: bold;
+          }
+
+          .no-contacts {
+            padding: 20px;
+            text-align: center;
+            color: #666;
+          }
+
+          .chat-main {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            background: white;
+          }
+
+          .chat-header-selected {
+            padding: 15px 20px;
+            background: white;
+            border-bottom: 1px solid #e0e0e0;
+          }
+
+          .selected-user-info {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+          }
+
+          .selected-user-avatar {
             width: 35px;
             height: 35px;
             border-radius: 50%;
@@ -390,24 +598,40 @@ export default function Chat() {
             font-size: 0.9rem;
           }
 
-          .user-name {
-            flex: 1;
-            font-size: 0.9rem;
+          .selected-user-info h4 {
+            margin: 0;
+            font-size: 1rem;
             color: #333;
           }
 
-          .user-status {
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-            background: #4caf50;
+          .status-text {
+            font-size: 0.8rem;
           }
 
-          .chat-main {
+          .status-text.online {
+            color: #4caf50;
+          }
+
+          .status-text.offline {
+            color: #999;
+          }
+
+          .no-chat-selected {
             flex: 1;
             display: flex;
-            flex-direction: column;
-            background: white;
+            align-items: center;
+            justify-content: center;
+            background: #fafafa;
+          }
+
+          .no-chat-content {
+            text-align: center;
+            color: #666;
+          }
+
+          .no-chat-content h3 {
+            margin-bottom: 10px;
+            font-size: 1.5rem;
           }
 
           .messages-container {
@@ -608,8 +832,8 @@ export default function Chat() {
 
           /* Mobile Responsive */
           @media (max-width: 768px) {
-            .users-sidebar {
-              width: 200px;
+            .contacts-sidebar {
+              width: 250px;
             }
 
             .message-content {
@@ -634,17 +858,18 @@ export default function Chat() {
           }
 
           @media (max-width: 640px) {
-            .users-sidebar {
+            .contacts-sidebar {
               position: absolute;
-              left: -250px;
+              left: -300px;
               top: 0;
               height: 100%;
               z-index: 1000;
               transition: left 0.3s ease;
               box-shadow: 2px 0 10px rgba(0, 0, 0, 0.1);
+              width: 300px;
             }
 
-            .users-sidebar.open {
+            .contacts-sidebar.open {
               left: 0;
             }
 
