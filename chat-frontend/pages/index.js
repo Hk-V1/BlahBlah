@@ -2,7 +2,8 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
 import Head from 'next/head';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'https://your-render-app.onrender.com';
+const API_BASE = 'https://blahblah-zl3k.onrender.com';
+console.log('API_BASE:', API_BASE);
 
 export default function Home() {
   const [isLogin, setIsLogin] = useState(true);
