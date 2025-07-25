@@ -1,4 +1,5 @@
-#BlahBlah
+# BlahBlah
+
 ## Real-Time Chat Application
 
 A full-stack real-time chat application with user authentication and persistent messaging. Built using Next.js for the frontend and Express with Socket.IO for the backend.
