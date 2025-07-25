@@ -13,7 +13,7 @@ export default function AuthPage() {
     const endpoint = isLogin ? '/login' : '/register';
 
     try {
-      const res = await axios.post(`http://localhost:5000${endpoint}`, {
+      const res = await axios.post(`https://chat-backend-xyz.onrender.com${endpoint}`, {
         username,
         password,
       });
