@@ -1,6 +1,12 @@
-# Real-Time Chat Application
+#BlahBlah
+## Real-Time Chat Application
 
 A full-stack real-time chat application with user authentication and persistent messaging. Built using Next.js for the frontend and Express with Socket.IO for the backend.
+
+## Live Demo
+
+Access the application here: [https://blah-blah-omega.vercel.app](https://blah-blah-omega.vercel.app)
+
 
 ## Project Structure
 
