@@ -1,86 +1,62 @@
 const express = require('express');
 const cors = require('cors');
-const http = require('http');
-const { Server } = require('socket.io');
-const fs = require('fs');
-const path = require('path');
-
 const app = express();
-const server = http.createServer(app);
-const io = new Server(server, {
-  cors: { origin: 'http://localhost:3000', methods: ['GET', 'POST'] },
-});
+const PORT = process.env.PORT || 5000;
 
 app.use(cors());
 app.use(express.json());
 
-// --- User storage (in-memory for now)
-const users = [];
+let users = [];  // In-memory user storage
+let messages = {}; // Store chat messages by username
 
-// --- Ensure chats/ folder exists
-const chatsDir = path.join(__dirname, 'chats');
-if (!fs.existsSync(chatsDir)) {
-  fs.mkdirSync(chatsDir);
-}
-
-// --- Register endpoint
+// REGISTER
 app.post('/register', (req, res) => {
   const { username, password } = req.body;
+
   if (users.find(u => u.username === username)) {
     return res.json({ success: false, message: 'Username already exists' });
   }
+
   users.push({ username, password });
-  res.json({ success: true, user: { username } });
+  messages[username] = [];
+  return res.json({ success: true, user: { username } });
 });
 
-// --- Login endpoint
+// LOGIN
 app.post('/login', (req, res) => {
   const { username, password } = req.body;
+
   const user = users.find(u => u.username === username && u.password === password);
-  if (user) {
-    res.json({ success: true, user: { username } });
-  } else {
-    res.json({ success: false, message: 'Invalid credentials' });
+  if (!user) {
+    return res.json({ success: false, message: 'Invalid credentials' });
   }
+
+  return res.json({ success: true, user: { username } });
 });
 
-// --- Socket.IO communication
-io.on('connection', (socket) => {
-  console.log('🔌 New client connected');
+// SAVE MESSAGE
+app.post('/message', (req, res) => {
+  const { username, message } = req.body;
 
-  socket.on('join', (username) => {
-    const chatFile = path.join(chatsDir, `${username}.json`);
-    if (fs.existsSync(chatFile)) {
-      const history = JSON.parse(fs.readFileSync(chatFile, 'utf-8'));
-      socket.emit('chatHistory', history);
-    }
-  });
+  if (!messages[username]) {
+    messages[username] = [];
+  }
 
-  socket.on('message', (data) => {
-    const { user, message } = data;
-    const chatFile = path.join(chatsDir, `${user}.json`);
-
-    let history = [];
-    if (fs.existsSync(chatFile)) {
-      history = JSON.parse(fs.readFileSync(chatFile, 'utf-8'));
-    }
-
-    const newMessage = {
-      user,
-      message,
-      timestamp: new Date().toISOString()
-    };
-
-    history.push(newMessage);
-    fs.writeFileSync(chatFile, JSON.stringify(history, null, 2));
-
-    io.emit('message', newMessage); // Broadcast to all clients
-  });
-
-  socket.on('disconnect', () => {
-    console.log('❌ Client disconnected');
-  });
+  messages[username].push({ text: message, timestamp: Date.now() });
+  res.json({ success: true });
 });
 
-// --- Start server
-server.listen(5000, () => console.log('🚀 Backend listening on http://localhost:5000'));
+// GET MESSAGES
+app.get('/messages/:username', (req, res) => {
+  const { username } = req.params;
+
+  if (!messages[username]) {
+    return res.json({ messages: [] });
+  }
+
+  res.json({ messages: messages[username] });
+});
+
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+});
