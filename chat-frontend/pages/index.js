@@ -33,6 +33,12 @@ export default function Home() {
       return;
     }
 
+    if (!isLogin && !confirmPassword.trim()) {
+      setError('Please confirm your password');
+      setLoading(false);
+      return;
+    }
+
     if (!isLogin && password !== confirmPassword) {
       setError('Passwords do not match');
       setLoading(false);
@@ -71,6 +77,14 @@ export default function Home() {
     }
   };
 
+  const switchMode = (loginMode) => {
+    setIsLogin(loginMode);
+    setError('');
+    setUsername('');
+    setPassword('');
+    setConfirmPassword('');
+  };
+
   return (
     <>
       <Head>
@@ -89,19 +103,13 @@ export default function Home() {
           <div className="auth-tabs">
             <button 
               className={isLogin ? 'tab active' : 'tab'}
-              onClick={() => {
-                setIsLogin(true);
-                setError('');
-              }}
+              onClick={() => switchMode(true)}
             >
               Login
             </button>
             <button 
               className={!isLogin ? 'tab active' : 'tab'}
-              onClick={() => {
-                setIsLogin(false);
-                setError('');
-              }}
+              onClick={() => switchMode(false)}
             >
               Register
             </button>
@@ -156,13 +164,7 @@ export default function Home() {
               <button 
                 type="button"
                 className="link-btn"
-                onClick={() => {
-                  setIsLogin(!isLogin);
-                  setError('');
-                  setUsername('');
-                  setPassword('');
-                  setConfirmPassword('');
-                }}
+                onClick={() => switchMode(!isLogin)}
               >
                 {isLogin ? 'Register here' : 'Login here'}
               </button>
