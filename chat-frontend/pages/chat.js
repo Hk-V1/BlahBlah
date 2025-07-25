@@ -16,6 +16,7 @@ export default function Chat() {
   const [typingUsers, setTypingUsers] = useState(new Set());
   const [connected, setConnected] = useState(false);
   const [unreadMessages, setUnreadMessages] = useState({});
+  const [sidebarOpen, setSidebarOpen] = useState(true); // New state for sidebar toggle
   const messagesEndRef = useRef(null);
   const typingTimeoutRef = useRef(null);
   const router = useRouter();
@@ -190,6 +191,11 @@ export default function Chat() {
     if (socket) {
       socket.emit('joinConversation', { otherUserId: selectedUserInfo.id });
     }
+
+    // Auto-close sidebar on mobile after selecting a user
+    if (window.innerWidth <= 768) {
+      setSidebarOpen(false);
+    }
   };
 
   const sendMessage = (e) => {
@@ -249,6 +255,10 @@ export default function Chat() {
     return conversations[selectedUser.id] || [];
   };
 
+  const toggleSidebar = () => {
+    setSidebarOpen(!sidebarOpen);
+  };
+
   if (!user) {
     return <div className="loading">Loading...</div>;
   }
@@ -263,6 +273,13 @@ export default function Chat() {
         {/* Header */}
         <header className="chat-header">
           <div className="header-left">
+            <button onClick={toggleSidebar} className="sidebar-toggle">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <line x1="3" y1="6" x2="21" y2="6"></line>
+                <line x1="3" y1="12" x2="21" y2="12"></line>
+                <line x1="3" y1="18" x2="21" y2="18"></line>
+              </svg>
+            </button>
             <h1>💬 BlahBlah</h1>
             <div className={`connection-status ${connected ? 'connected' : 'disconnected'}`}>
               {connected ? '🟢 Connected' : '🔴 Disconnected'}
@@ -275,8 +292,13 @@ export default function Chat() {
         </header>
 
         <div className="chat-body">
+          {/* Sidebar Overlay for mobile */}
+          {sidebarOpen && (
+            <div className="sidebar-overlay" onClick={() => setSidebarOpen(false)}></div>
+          )}
+
           {/* Contacts Sidebar */}
-          <aside className="contacts-sidebar">
+          <aside className={`contacts-sidebar ${sidebarOpen ? 'open' : 'closed'}`}>
             <h3>Contacts ({users.length})</h3>
             <div className="contacts-list">
               {users.map((contact) => (
@@ -418,6 +440,29 @@ export default function Chat() {
             box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
           }
 
+          .header-left {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+          }
+
+          .sidebar-toggle {
+            background: rgba(255, 255, 255, 0.2);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            color: white;
+            border-radius: 6px;
+            padding: 8px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background 0.3s ease;
+          }
+
+          .sidebar-toggle:hover {
+            background: rgba(255, 255, 255, 0.3);
+          }
+
           .header-left h1 {
             margin: 0;
             font-size: 1.5rem;
@@ -456,6 +501,18 @@ export default function Chat() {
             flex: 1;
             display: flex;
             overflow: hidden;
+            position: relative;
+          }
+
+          .sidebar-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 999;
+            display: none;
           }
 
           .contacts-sidebar {
@@ -464,6 +521,16 @@ export default function Chat() {
             border-right: 1px solid #e0e0e0;
             display: flex;
             flex-direction: column;
+            transition: transform 0.3s ease;
+            z-index: 1000;
+          }
+
+          .contacts-sidebar.closed {
+            transform: translateX(-100%);
+          }
+
+          .contacts-sidebar.open {
+            transform: translateX(0);
           }
 
           .contacts-sidebar h3 {
@@ -832,8 +899,20 @@ export default function Chat() {
 
           /* Mobile Responsive */
           @media (max-width: 768px) {
+            .sidebar-overlay {
+              display: block;
+            }
+
             .contacts-sidebar {
-              width: 250px;
+              position: absolute;
+              left: 0;
+              top: 0;
+              height: 100%;
+              box-shadow: 2px 0 10px rgba(0, 0, 0, 0.1);
+            }
+
+            .chat-main {
+              width: 100%;
             }
 
             .message-content {
@@ -858,25 +937,6 @@ export default function Chat() {
           }
 
           @media (max-width: 640px) {
-            .contacts-sidebar {
-              position: absolute;
-              left: -300px;
-              top: 0;
-              height: 100%;
-              z-index: 1000;
-              transition: left 0.3s ease;
-              box-shadow: 2px 0 10px rgba(0, 0, 0, 0.1);
-              width: 300px;
-            }
-
-            .contacts-sidebar.open {
-              left: 0;
-            }
-
-            .chat-main {
-              width: 100%;
-            }
-
             .message-content {
               max-width: 90%;
             }
