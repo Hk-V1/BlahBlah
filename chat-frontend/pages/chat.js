@@ -4,7 +4,7 @@ import Head from 'next/head';
 import io from 'socket.io-client';
 
 const API_BASE = 'https://blahblah-zl3k.onrender.com';
-console.log('API_BASE:', API_BASE); 
+console.log('API_BASE:', API_BASE);
 
 export default function Chat() {
   const [socket, setSocket] = useState(null);
@@ -32,11 +32,29 @@ export default function Chat() {
 
     // Initialize socket connection
     const newSocket = io(API_BASE, {
-      auth: { token }
+      transports: ['websocket', 'polling'],
+      upgrade: true,
+      rememberUpgrade: true,
+      timeout: 20000,
+      forceNew: true,
+      reconnection: true,
+      reconnectionAttempts: 5,
+      reconnectionDelay: 1000
     });
 
     newSocket.on('connect', () => {
       console.log('Connected to server');
+      setConnected(true);
+      newSocket.emit('join', { token });
+    });
+
+    newSocket.on('connect_error', (error) => {
+      console.error('Connection error:', error);
+      setConnected(false);
+    });
+
+    newSocket.on('reconnect', (attemptNumber) => {
+      console.log('Reconnected after', attemptNumber, 'attempts');
       setConnected(true);
       newSocket.emit('join', { token });
     });
