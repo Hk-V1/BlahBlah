@@ -51,38 +51,7 @@ chat-app/
 - Socket.IO for real-time communication  
 - CORS and body-parser for request handling  
 
-## Getting Started
-
-### 1. Clone the repository
-
-```bash
-git clone https://github.com/your-username/chat-app.git
-cd chat-app
-```
-
-### 2. Backend Setup
-
-```bash
-cd chat-backend
-npm install
-node index.js
-```
-
-This will start the backend server on `http://localhost:5000` by default.
-
-### 3. Frontend Setup
-
-```bash
-cd ../chat-frontend
-npm install
-npm run dev
-```
-
-This will start the Next.js development server on `http://localhost:3000`.
-
 ## Deployment
 
 - Frontend can be deployed to [Vercel](https://vercel.com/)  
-- Backend can be deployed to [Render](https://render.com/) or [Railway](https://railway.app/)  
-
-Make sure to update API and WebSocket URLs accordingly in both frontend and backend files.
+- Backend can be deployed to [Render](https://render.com/) 
