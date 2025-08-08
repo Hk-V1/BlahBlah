@@ -6,8 +6,8 @@ A full-stack real-time chat application with user authentication and persistent 
 
 ## Live Demo
 
-Access the application here: [https://blah-blah-omega.vercel.app](https://blah-blah-omega.vercel.app)
-
+**Access the application here**: [https://blah-blah-omega.vercel.app](https://blah-blah-omega.vercel.app)
+**GitHub Repository:** [https://github.com/Hk-V1/BlahBlah](https://github.com/Hk-V1/BlahBlah)
 
 ## Project Structure
 
